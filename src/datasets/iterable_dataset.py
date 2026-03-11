@@ -212,10 +212,6 @@ class _BaseExamplesIterable:
         return None
 
     @property
-    def is_typed(self) -> bool:
-        return False
-
-    @property
     def features(self) -> Optional[Features]:
         return None
 
@@ -441,10 +437,6 @@ class RebatchedArrowExamplesIterable(_BaseExamplesIterable):
         return self._iter_arrow
 
     @property
-    def is_typed(self):
-        return self.ex_iterable.is_typed
-
-    @property
     def features(self):
         return self.ex_iterable.features
 
@@ -469,7 +461,7 @@ class RebatchedArrowExamplesIterable(_BaseExamplesIterable):
         if self.ex_iterable.iter_arrow:
             iterator = self.ex_iterable.iter_arrow()
         else:
-            iterator = _convert_to_arrow(self.ex_iterable, batch_size=1, features=self.ex_iterable.features)
+            iterator = _convert_to_arrow(self.ex_iterable, batch_size=1, features=self.features)
         if self.batch_size is None or self.batch_size <= 0:
             if self._state_dict and self._state_dict["batch_idx"] > 0:
                 return
@@ -584,10 +576,6 @@ class SelectColumnsIterable(_BaseExamplesIterable):
             return self._iter_arrow
 
     @property
-    def is_typed(self):
-        return self.ex_iterable.is_typed
-
-    @property
     def features(self):
         return self.ex_iterable.features
 
@@ -627,10 +615,6 @@ class StepExamplesIterable(_BaseExamplesIterable):
         self.step = step
         self.offset = offset
         # TODO(QL): implement iter_arrow
-
-    @property
-    def is_typed(self):
-        return self.ex_iterable.is_typed
 
     @property
     def features(self):
@@ -691,10 +675,6 @@ class CyclingMultiSourcesExamplesIterable(_BaseExamplesIterable):
         self.bool_strategy_func = (
             np.all if (stopping_strategy in ("all_exhausted", "all_exhausted_without_replacement")) else np.any
         )
-
-    @property
-    def is_typed(self):
-        return self.ex_iterables[0].is_typed
 
     @property
     def features(self):
@@ -874,10 +854,6 @@ class VerticallyConcatenatedMultiSourcesExamplesIterable(_BaseExamplesIterable):
         self.ex_iterables = ex_iterables
 
     @property
-    def is_typed(self):
-        return self.ex_iterables[0].is_typed
-
-    @property
     def features(self):
         return self.ex_iterables[0].features
 
@@ -977,10 +953,6 @@ class HorizontallyConcatenatedMultiSourcesExamplesIterable(_BaseExamplesIterable
         # TODO(QL): implement iter_arrow
 
     @property
-    def is_typed(self):
-        return self.ex_iterables[0].is_typed
-
-    @property
     def features(self):
         return self.ex_iterables[0].features
 
@@ -1058,10 +1030,6 @@ class RandomlyCyclingMultiSourcesExamplesIterable(CyclingMultiSourcesExamplesIte
             probabilities=self.probabilities,
             stopping_strategy=self.stopping_strategy,
         )
-
-    @property
-    def is_typed(self):
-        return self.ex_iterables[0].is_typed
 
     @property
     def features(self):
@@ -1223,10 +1191,6 @@ class MappedExamplesIterable(_BaseExamplesIterable):
     def iter_arrow(self):
         if self.formatting and self.formatting.is_table:
             return self._iter_arrow
-
-    @property
-    def is_typed(self):
-        return self.features is not None  # user has extracted features
 
     @property
     def features(self):
@@ -1613,7 +1577,7 @@ class FilteredExamplesIterable(MappedExamplesIterable):
         formatting: Optional["FormattingConfig"] = None,
     ):
         self.mask_function = function
-        if ex_iterable.is_typed:
+        if ex_iterable.features is not None:
             features = Features({**ex_iterable.features, self.mask_column_name: Value("bool")})
         else:
             features = None
@@ -1632,6 +1596,12 @@ class FilteredExamplesIterable(MappedExamplesIterable):
             formatting=formatting,
             features=features,
         )
+
+    @property
+    def features(self):
+        # The mask column is an internal implementation detail — the output
+        # schema matches the input schema (mask is stripped in _iter/_iter_arrow).
+        return self.ex_iterable.features
 
     def _iter(self):
         for key, example in super()._iter():
@@ -1702,10 +1672,6 @@ class BufferShuffledExamplesIterable(_BaseExamplesIterable):
             buffer_size=self.buffer_size,
             generator=np.random.default_rng(seed=new_seed),
         )
-
-    @property
-    def is_typed(self):
-        return self.ex_iterable.is_typed
 
     @property
     def features(self):
@@ -1808,10 +1774,6 @@ class SkipExamplesIterable(_BaseExamplesIterable):
         self.block_sources_order_when_shuffling = block_sources_order_when_shuffling
         self.split_when_sharding = split_when_sharding
         # TODO(QL): implement iter_arrow
-
-    @property
-    def is_typed(self):
-        return self.ex_iterable.is_typed
 
     @property
     def features(self):
@@ -1948,10 +1910,6 @@ class TakeExamplesIterable(_BaseExamplesIterable):
         # TODO(QL): implement iter_arrow
 
     @property
-    def is_typed(self):
-        return self.ex_iterable.is_typed
-
-    @property
     def features(self):
         return self.ex_iterable.features
 
@@ -2085,10 +2043,6 @@ class FormattedExamplesIterable(_BaseExamplesIterable):
             return self._iter_arrow
 
     @property
-    def is_typed(self):
-        return self.ex_iterable.is_typed or self._features is not None
-
-    @property
     def features(self):
         return self._features
 
@@ -2097,15 +2051,18 @@ class FormattedExamplesIterable(_BaseExamplesIterable):
         return self._state_dict
 
     def __iter__(self):
+        # Skip feature application if the inner iterable already produces matching features
+        features_already_applied = self.ex_iterable.features is not None and self.ex_iterable.features == self.features
+        effective_features = self.features if not features_already_applied else None
         if not self.formatting or self.formatting.is_table:
             formatter = PythonFormatter(
-                features=self._features if not self.ex_iterable.is_typed else None,
+                features=effective_features,
                 token_per_repo_id=self.token_per_repo_id,
             )
         else:
             formatter = get_formatter(
                 self.formatting.format_type,
-                features=self._features if not self.ex_iterable.is_typed else None,
+                features=effective_features,
                 token_per_repo_id=self.token_per_repo_id,
             )
         if self.ex_iterable.iter_arrow:
@@ -2121,8 +2078,7 @@ class FormattedExamplesIterable(_BaseExamplesIterable):
                 else None  # cast in case features is None
             )
             for key, example in self.ex_iterable:
-                # don't apply feature types if already applied by ex_iterable (e.g. in case of chained with_format)
-                if self.features and not self.ex_iterable.is_typed:
+                if effective_features:
                     example = _apply_feature_types_on_example(
                         example, self.features, token_per_repo_id=self.token_per_repo_id
                     )
@@ -3301,12 +3257,7 @@ class IterableDataset(DatasetInfoMixin):
             features = _fix_for_backward_compatible_features(features)
 
         ex_iterable = self._ex_iterable
-        # no need to apply features if ex_iterable is typed and if there was no cast_column()
-        input_features = (
-            None
-            if (ex_iterable.is_typed and (self._info.features is None or self._info.features == ex_iterable.features))
-            else self._info.features
-        )
+        input_features = self._info.features
 
         if self._formatting and self._formatting.is_table:
             # apply formatting before iter_arrow to keep map examples iterable happy
@@ -3419,7 +3370,7 @@ class IterableDataset(DatasetInfoMixin):
             ex_iterable = FormattedExamplesIterable(
                 ex_iterable,
                 formatting=self._formatting,
-                features=ex_iterable.features if ex_iterable.is_typed else self._info.features,
+                features=self._info.features,
                 token_per_repo_id=self._token_per_repo_id,
             )
 
@@ -4080,7 +4031,7 @@ class IterableDataset(DatasetInfoMixin):
     def _resolve_features(self):
         if self.features is not None:
             return self
-        elif self._ex_iterable.is_typed:
+        elif self._ex_iterable.features is not None:
             features = self._ex_iterable.features
         else:
             features = _infer_features_from_batch(self.with_format(None)._head())

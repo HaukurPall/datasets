@@ -1851,10 +1851,9 @@ def test_iterable_dataset_filter(dataset: IterableDataset) -> None:
 def test_iterable_dataset_filter_chaining_does_not_raise() -> None:
     """Chaining two .filter() calls must not raise TypeError.
 
-    After the first .filter() the internal ex_iterable becomes typed
-    (is_typed=True) because FilteredExamplesIterable adds a mask column.
-    The second .filter() then wraps it in FormattedExamplesIterable.
-    Previously, features=None was passed when is_typed=True, causing
+    After the first .filter() the internal ex_iterable includes a mask column
+    in its features. The second .filter() then wraps it in FormattedExamplesIterable.
+    Previously, features=None was passed in certain conditions, causing
     FilteredExamplesIterable.__init__ to crash with:
       TypeError: 'NoneType' object is not a mapping
     (issue #8037)
